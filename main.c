@@ -16,6 +16,9 @@
 #include "machctrl.h"
 #include "bind.h"
 
+#ifndef MAL_VERBOSE_SYMTAB
+#define MAL_VERBOSE_SYMTAB 0
+#endif
 
 void* openExec(char* filename)
 {
@@ -679,7 +682,12 @@ int loader_64(mach_context* context)
                 struct nlist_64 nlist = *((struct nlist_64 *)(context->memblock + symtab.symoff + (sizeof(struct nlist_64) * c_sym)));
                 char* symbol = (char *)(context->memblock + symtab.stroff + nlist.n_un.n_strx);
                 
-                printf("0x%llx -> %s %d\n", (void *)nlist.n_value - context->v_addr, symbol, nlist.n_type);
+                if (MAL_VERBOSE_SYMTAB || !strcmp(symbol, "_main") || nlist.n_value == 0xffffffff00000000) {
+                    printf("0x%llx -> %s %d\n",
+                   (void *)nlist.n_value - context->v_addr,
+                    symbol,
+                    nlist.n_type);
+                }
                 if (!strcmp(symbol, "_main"))
                 {
                     context->entry_point = (void *)nlist.n_value - context->v_addr + context->img_addr;
