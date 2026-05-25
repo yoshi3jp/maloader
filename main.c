@@ -83,7 +83,7 @@ void print_segment(struct segment_command lc_segment)
            lc_segment.flags
            );
 }
-#if __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 uint64_t alignMemory(uint64_t pointer, uint64_t alignment) {
 #else
 uint32_t alignMemory(uint32_t pointer, uint32_t alignment) {

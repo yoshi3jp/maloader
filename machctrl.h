@@ -56,7 +56,11 @@ int determineBit(void* mach_header);
 void print_segment_64(struct segment_command_64 lc_segment);
 
 #if defined(__x86_64__) || defined(__LP64__)
+#if defined(__x86_64__) || defined(__aarch64__)
 uint64_t alignMemory(uint64_t pointer, uint64_t alignment);
+#else
+uint32_t alignMemory(uint32_t pointer, uint32_t alignment);
+#endif
 #else
 uint32_t alignMemory(uint32_t pointer, uint32_t alignment);
 #endif
