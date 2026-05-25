@@ -11,6 +11,7 @@
 #include "mach-o/loader.h"
 #include "mach-o/nlist.h"
 #include "mach-o/fixup-chains.h"
+#include "mach-o/fixup-compat.h"
 
 #include "machctrl.h"
 #include "bind.h"
@@ -301,11 +302,11 @@ int dylib_list_retriever(mach_context* context, char *dylib_name)
 static const char* chained_import_format_name(uint32_t fmt)
 {
     switch (fmt) {
-        case DYLD_CHAINED_IMPORT:
+        case MAL_DYLD_CHAINED_IMPORT:
             return "DYLD_CHAINED_IMPORT";
-        case DYLD_CHAINED_IMPORT_ADDEND:
+        case MAL_DYLD_CHAINED_IMPORT_ADDEND:
             return "DYLD_CHAINED_IMPORT_ADDEND";
-        case DYLD_CHAINED_IMPORT_ADDEND64:
+        case MAL_DYLD_CHAINED_IMPORT_ADDEND64:
             return "DYLD_CHAINED_IMPORT_ADDEND64";
         default:
             return "unknown";
@@ -327,46 +328,24 @@ static const char* chained_symbol_format_name(uint32_t fmt)
 static const char* chained_pointer_format_name(uint16_t fmt)
 {
     switch (fmt) {
-#ifdef DYLD_CHAINED_PTR_ARM64E
-        case DYLD_CHAINED_PTR_ARM64E:
+        case MAL_DYLD_CHAINED_PTR_ARM64E:
             return "DYLD_CHAINED_PTR_ARM64E";
-#endif
-#ifdef DYLD_CHAINED_PTR_64
-        case DYLD_CHAINED_PTR_64:
+        case MAL_DYLD_CHAINED_PTR_64:
             return "DYLD_CHAINED_PTR_64";
-#endif
-#ifdef DYLD_CHAINED_PTR_64_OFFSET
-        case DYLD_CHAINED_PTR_64_OFFSET:
+        case MAL_DYLD_CHAINED_PTR_64_OFFSET:
             return "DYLD_CHAINED_PTR_64_OFFSET";
-#endif
-#ifdef DYLD_CHAINED_PTR_64_KERNEL_CACHE
-        case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
+        case MAL_DYLD_CHAINED_PTR_64_KERNEL_CACHE:
             return "DYLD_CHAINED_PTR_64_KERNEL_CACHE";
-#endif
-#ifdef DYLD_CHAINED_PTR_64_FIRMWARE
-        case DYLD_CHAINED_PTR_64_FIRMWARE:
-            return "DYLD_CHAINED_PTR_64_FIRMWARE";
-#endif
-#ifdef DYLD_CHAINED_PTR_32
-        case DYLD_CHAINED_PTR_32:
+        case MAL_DYLD_CHAINED_PTR_32:
             return "DYLD_CHAINED_PTR_32";
-#endif
-#ifdef DYLD_CHAINED_PTR_32_CACHE
-        case DYLD_CHAINED_PTR_32_CACHE:
+        case MAL_DYLD_CHAINED_PTR_32_CACHE:
             return "DYLD_CHAINED_PTR_32_CACHE";
-#endif
-#ifdef DYLD_CHAINED_PTR_32_FIRMWARE
-        case DYLD_CHAINED_PTR_32_FIRMWARE:
+        case MAL_DYLD_CHAINED_PTR_32_FIRMWARE:
             return "DYLD_CHAINED_PTR_32_FIRMWARE";
-#endif
-#ifdef DYLD_CHAINED_PTR_ARM64E_USERLAND
-        case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+        case MAL_DYLD_CHAINED_PTR_ARM64E_USERLAND:
             return "DYLD_CHAINED_PTR_ARM64E_USERLAND";
-#endif
-#ifdef DYLD_CHAINED_PTR_ARM64E_USERLAND24
-        case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+        case MAL_DYLD_CHAINED_PTR_ARM64E_USERLAND24:
             return "DYLD_CHAINED_PTR_ARM64E_USERLAND24";
-#endif
         default:
             return "unknown";
     }
