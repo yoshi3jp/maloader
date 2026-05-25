@@ -37,5 +37,7 @@ static void guard(void);
 
 int do_bind(mach_context* context);
 
+int apply_chained_bind(mach_context* context, void* loc, const char* symbol_name, int64_t addend);
+
 int bind_list_retriever(mach_context* context, const uint8_t* const start, const uint8_t* const end);
 #endif	/* _BIND_H_ */

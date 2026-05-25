@@ -47,6 +47,7 @@ typedef struct  {
     segment_info    segments[MACH_LOADER_MAX_SEGMENTS];
     uint32_t chained_rebase_count;
     uint32_t chained_bind_count;
+    uint32_t chained_unresolved_bind_count;
     int argc;
     char **argv;
     int bit;

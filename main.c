@@ -575,7 +575,12 @@ static void dump_chained_64_offset_entries(mach_context* context,
                        name ? name : "(bad ordinal)",
                        next);
                 
+                if (name) {
+                    apply_chained_bind(context, loc, name, addend);
+                } else {
                 context->chained_bind_count++;
+                context->chained_unresolved_bind_count++;
+                }
             } else {
                 uint64_t target = chained64_rebase_target(raw);
                 void* final = (uint8_t*)context->img_addr + target;

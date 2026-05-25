@@ -23,6 +23,13 @@
 
 #define DARWIN_MAP_ANON 0x1000
 
+extern char **environ;
+
+static FILE* mal_stdinp;
+static FILE* mal_stdoutp;
+static FILE* mal_stderrp;
+static uintptr_t mal_stack_chk_guard = 0x6d616c6f61646572ULL;
+
 static void* host_mmap_for_darwin(void* addr,
                                   size_t length,
                                   int prot,
@@ -51,6 +58,161 @@ void print_bind_list(bind_list* list)
     printf("---           ---\n");
 }
 
+static int* mal_darwin_error(void)
+{
+    return &errno;
+}
+
+static char*** mal_NSGetEnviron(void)
+{
+    return &environ;
+}
+
+static void mal_chkstk_darwin(void)
+{
+    /* no-op for this loader experiment */
+}
+
+static int mal_darwin_check_fd_set_overflow(int fd, const void* set, int write)
+{
+    (void)fd;
+    (void)set;
+    (void)write;
+    return 0;
+}
+
+static void mal_memset_pattern16(void* dst, const void* pattern16, size_t len)
+{
+    uint8_t* d = dst;
+    const uint8_t* p = pattern16;
+
+    for (size_t i = 0; i < len; i++) {
+        d[i] = p[i & 15];
+    }
+}
+
+static void* open_host_libc(void)
+{
+    static void* libc_handle;
+
+    if (!libc_handle) {
+        libc_handle = dlopen("libc.so.6", RTLD_LAZY | RTLD_GLOBAL);
+        if (!libc_handle) {
+            printf("dlopen(libc.so.6) failed: %s\n", dlerror());
+        }
+    }
+
+    return libc_handle;
+}
+
+static void normalize_macho_symbol_name(const char* macho_name,
+                                        char* out,
+                                        size_t out_size)
+{
+    const char* c = macho_name ? macho_name : "";
+
+    if (c[0] == '_') {
+        c++;
+    }
+
+    snprintf(out, out_size, "%s", c);
+
+    /*
+     * Darwin suffixes such as:
+     *   _realpath$DARWIN_EXTSN
+     *   _syslog$DARWIN_EXTSN
+     */
+    char* suffix = strchr(out, '$');
+    if (suffix) {
+        *suffix = '\0';
+    }
+}
+
+static void* resolve_macho_import_symbol(const char* macho_name)
+{
+    char namebuf[256];
+
+    if (!macho_name) {
+        return NULL;
+    }
+
+    normalize_macho_symbol_name(macho_name, namebuf, sizeof(namebuf));
+
+    if (!strcmp(namebuf, "__NSGetEnviron")) {
+        return mal_NSGetEnviron;
+    }
+
+    if (!strcmp(namebuf, "__error")) {
+        return mal_darwin_error;
+    }
+
+    if (!strcmp(namebuf, "__stack_chk_guard")) {
+        return &mal_stack_chk_guard;
+    }
+
+    if (!strcmp(namebuf, "__stdinp")) {
+        mal_stdinp = stdin;
+        return &mal_stdinp;
+    }
+
+    if (!strcmp(namebuf, "__stdoutp")) {
+        mal_stdoutp = stdout;
+        return &mal_stdoutp;
+    }
+
+    if (!strcmp(namebuf, "__stderrp")) {
+        mal_stderrp = stderr;
+        return &mal_stderrp;
+    }
+
+    if (!strcmp(namebuf, "__chkstk_darwin")) {
+        return mal_chkstk_darwin;
+    }
+
+    if (!strcmp(namebuf, "__darwin_check_fd_set_overflow")) {
+        return mal_darwin_check_fd_set_overflow;
+    }
+
+    if (!strcmp(namebuf, "memset_pattern16")) {
+        return mal_memset_pattern16;
+    }
+
+    void* libc = open_host_libc();
+    if (!libc) {
+        return NULL;
+    }
+
+    return dlsym(libc, namebuf);
+}
+
+int apply_chained_bind(mach_context* context,
+                       void* loc,
+                       const char* symbol_name,
+                       int64_t addend)
+{
+    void* resolved = resolve_macho_import_symbol(symbol_name);
+
+    context->chained_bind_count++;
+
+    if (!resolved) {
+        printf("      unresolved chained import: %s\n",
+               symbol_name ? symbol_name : "(null)");
+        context->chained_unresolved_bind_count++;
+        return -1;
+    }
+
+    uint64_t final = (uint64_t)(uintptr_t)resolved + addend;
+
+    printf("      APPLY bind loc=%p symbol=%s resolved=%p addend=%lld final=0x%llx\n",
+           loc,
+           symbol_name,
+           resolved,
+           (long long)addend,
+           final);
+
+    *(uint64_t*)loc = final;
+    return 0;
+}
 
 static void guard(void)
 {
