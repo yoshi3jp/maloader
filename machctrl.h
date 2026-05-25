@@ -45,6 +45,8 @@ typedef struct  {
     dylib_list d_list;
     int             n_segment_info;
     segment_info    segments[MACH_LOADER_MAX_SEGMENTS];
+    uint32_t chained_rebase_count;
+    uint32_t chained_bind_count;
     int argc;
     char **argv;
     int bit;
