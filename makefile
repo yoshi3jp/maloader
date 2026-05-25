@@ -2,6 +2,7 @@
 
 # マクロ定義部
 CC      = clang
+CFLAGS  = -std=gnu11 -Wno-int-conversion -Wno-int-to-void-pointer-cast
 CUIOBJS = main.o bind.o
 BASEOBJS    =
 DEP	= -ldl
@@ -11,13 +12,13 @@ IOS	    = -arch armv7 -isysroot /Applications/Xcode.app/Contents/Developer/Platf
 # 生成規則部
 
 main: $(CUIOBJS) $(BASEOBJS)
-	$(CC) -rdynamic -I$(CURDIR) -o $@ $^ $(DEP)
+	$(CC) $(CFLAGS) -rdynamic -I$(CURDIR) -o $@ $^ $(DEP)
 
 ios-main: $(CUIOBJS) $(BASEOBJS)
-	$(CC) -rdynamic -I$(CURDIR) -o $@ $^ $(DEP)
+	$(CC) $(CFLAGS) -rdynamic -I$(CURDIR) -o $@ $^ $(DEP)
 
 .c.o:
-	$(CC) -I$(CURDIR) -c $< $(DEP)
+	$(CC) $(CFLAGS) -I$(CURDIR) -c $< $(DEP)
 
 
 ######
