@@ -351,6 +351,13 @@ static const char* chained_pointer_format_name(uint16_t fmt)
     }
 }
 
+static void dump_chained_64_offset_entries(
+    mach_context* context,
+    const uint8_t* fixups_base,
+    const struct dyld_chained_fixups_header* hdr,
+    uint32_t segment_index,
+    const struct dyld_chained_starts_in_segment* seg); //prototype
+
 static void dump_chained_fixups(mach_context* context,
                                 uint32_t dataoff,
                                 uint32_t datasize)
@@ -427,9 +434,141 @@ static void dump_chained_fixups(mach_context* context,
                    page,
                    seg->page_start[page]);
         }
+        
+        if (seg->pointer_format == MAL_DYLD_CHAINED_PTR_64_OFFSET) {
+            dump_chained_64_offset_entries(context,
+                                           fixups_base,
+                                           hdr,
+                                           i,
+                                           seg);
+        }
 
         if (seg->page_count > 8) {
             printf("      ...\n");
+        }
+    }
+}
+
+static uint32_t chained64_bind_ordinal(uint64_t raw)
+{
+    return raw & 0xFFFFFF;
+}
+
+static int8_t chained64_bind_addend(uint64_t raw)
+{
+    return (int8_t)((raw >> 24) & 0xFF);
+}
+
+static uint64_t chained64_rebase_target(uint64_t raw)
+{
+    return raw & 0xFFFFFFFFF; /* 36 bits */
+}
+
+static uint16_t chained64_next(uint64_t raw)
+{
+    return (raw >> 51) & 0xFFF;
+}
+
+static int chained64_is_bind(uint64_t raw)
+{
+    return (raw >> 63) & 1;
+}
+
+static const char* chained_import_name(const uint8_t* fixups_base,
+                                       const struct dyld_chained_fixups_header* hdr,
+                                       uint32_t ordinal)
+{
+    if (ordinal >= hdr->imports_count) {
+        return NULL;
+    }
+
+    const struct dyld_chained_import* imports =
+        (const struct dyld_chained_import*)(fixups_base + hdr->imports_offset);
+
+    const char* symbols = (const char*)(fixups_base + hdr->symbols_offset);
+
+    return symbols + imports[ordinal].name_offset;
+}
+
+static void dump_chained_64_offset_entries(mach_context* context,
+                                           const uint8_t* fixups_base,
+                                           const struct dyld_chained_fixups_header* hdr,
+                                           uint32_t segment_index,
+                                           const struct dyld_chained_starts_in_segment* seg)
+{
+    if (segment_index >= context->n_segment_info) {
+        printf("  segment[%u]: no matching loaded segment\n", segment_index);
+        return;
+    }
+
+    segment_info* loaded_seg = &context->segments[segment_index];
+
+    if (loaded_seg->mapped_addr == NULL) {
+        printf("  segment[%u]: mapped_addr is NULL\n", segment_index);
+        return;
+    }
+
+    printf("  segment[%u] chain entries:\n", segment_index);
+
+    for (uint16_t page = 0; page < seg->page_count; page++) {
+        uint16_t page_start = seg->page_start[page];
+
+        if (page_start == MAL_DYLD_CHAINED_PTR_START_NONE) {
+            continue;
+        }
+
+        if (page_start & MAL_DYLD_CHAINED_PTR_START_MULTI) {
+            printf("    page[%u]: multi-start not implemented yet: 0x%x\n",
+                   page,
+                   page_start);
+            continue;
+        }
+
+        uint64_t chain_offset =
+            seg->segment_offset +
+            ((uint64_t)page * seg->page_size) +
+            page_start;
+
+        uint8_t* loc = (uint8_t*)context->img_addr + chain_offset;
+
+        printf("    page[%u] start=0x%x chain_offset=0x%llx loc=%p\n",
+               page,
+               page_start,
+               chain_offset,
+               loc);
+
+        for (unsigned chain_count = 0; chain_count < 512; chain_count++) {
+            uint64_t raw = *(uint64_t*)loc;
+            uint16_t next = chained64_next(raw);
+
+            if (chained64_is_bind(raw)) {
+                uint32_t ordinal = chained64_bind_ordinal(raw);
+                int8_t addend = chained64_bind_addend(raw);
+                const char* name = chained_import_name(fixups_base, hdr, ordinal);
+
+                printf("      bind   loc=%p raw=0x%016llx ordinal=%u addend=%d symbol=%s next=%u\n",
+                       loc,
+                       raw,
+                       ordinal,
+                       addend,
+                       name ? name : "(bad ordinal)",
+                       next);
+            } else {
+                uint64_t target = chained64_rebase_target(raw);
+
+                printf("      rebase loc=%p raw=0x%016llx target=0x%llx final=%p next=%u\n",
+                       loc,
+                       raw,
+                       target,
+                       (uint8_t*)context->img_addr + target,
+                       next);
+            }
+
+            if (next == 0) {
+                break;
+            }
+
+            loc += next * 4;
         }
     }
 }
