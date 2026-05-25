@@ -14,6 +14,33 @@
 #include "machctrl.h"
 #include "bind.h"
 
+#ifdef __linux__
+#include <stdint.h>
+
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+
+#define DARWIN_MAP_ANON 0x1000
+
+static void* host_mmap_for_darwin(void* addr,
+                                  size_t length,
+                                  int prot,
+                                  int flags,
+                                  int fd,
+                                  off_t offset)
+{
+    int host_flags = flags;
+
+    if (flags & DARWIN_MAP_ANON) {
+        host_flags &= ~DARWIN_MAP_ANON;
+        host_flags |= MAP_ANONYMOUS;
+    }
+
+    return mmap(addr, length, prot, host_flags, fd, offset);
+}
+#endif
+
 
 void print_bind_list(bind_list* list)
 {
@@ -40,7 +67,7 @@ int do_bind(mach_context* context)
     libm
 */
     //dylib_list_retriever(context, "/lib/x86_64-linux-gnu/libc-2.15.so");
-dylib_list_retriever(context, "libc.so.6");
+    dylib_list_retriever(context, "libc.so.6");
     
     printf("loading dylib...\n");
     for (int i = 0; i < context->d_list.n_dylib_info; i++) {
@@ -62,14 +89,22 @@ printf("Function [%s] was not binded for it seemed unfit.\n", context->b_list.in
                 if (c[0] == '_') {
                     c++;
                 }
-if(!strcmp(c, "__stack_chk_guard"))
-{
-printf("stack_chk_guard (supress error) 0x%llx\n",context->b_list.info[j].address);
-	 //unsigned long __stack_chk_guard = 0;
-	ptrval* func_dest = context->b_list.info[j].address;
-        *func_dest = guard;
-continue;
-}
+                #ifdef __linux__
+                if (!strcmp(c, "mmap")) {
+                    printf("using Darwin mmap wrapper\n");
+                    ptrval* func_dest = context->b_list.info[j].address;
+                    *func_dest = (ptrval)host_mmap_for_darwin;
+                    continue;
+                }
+                #endif
+                if(!strcmp(c, "__stack_chk_guard"))
+                {
+                    printf("stack_chk_guard (supress error) 0x%llx\n",context->b_list.info[j].address);
+                    //unsigned long __stack_chk_guard = 0;
+                    ptrval* func_dest = context->b_list.info[j].address;
+                    *func_dest = guard;
+                    continue;
+                }
 
                 ptrval* initializer = (void *)dlsym(library, c);
                 if (initializer == (ptrval) NULL) {
