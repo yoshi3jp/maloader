@@ -10,6 +10,7 @@
 #include <dlfcn.h>
 #include "mach-o/loader.h"
 #include "mach-o/nlist.h"
+#include "mach-o/fixup-chains.h"
 
 #include "machctrl.h"
 #include "bind.h"
@@ -297,6 +298,162 @@ int dylib_list_retriever(mach_context* context, char *dylib_name)
     return 0;
 }
 
+static const char* chained_import_format_name(uint32_t fmt)
+{
+    switch (fmt) {
+        case DYLD_CHAINED_IMPORT:
+            return "DYLD_CHAINED_IMPORT";
+        case DYLD_CHAINED_IMPORT_ADDEND:
+            return "DYLD_CHAINED_IMPORT_ADDEND";
+        case DYLD_CHAINED_IMPORT_ADDEND64:
+            return "DYLD_CHAINED_IMPORT_ADDEND64";
+        default:
+            return "unknown";
+    }
+}
+
+static const char* chained_symbol_format_name(uint32_t fmt)
+{
+    switch (fmt) {
+        case 0:
+            return "uncompressed";
+        case 1:
+            return "zlib compressed";
+        default:
+            return "unknown";
+    }
+}
+
+static const char* chained_pointer_format_name(uint16_t fmt)
+{
+    switch (fmt) {
+#ifdef DYLD_CHAINED_PTR_ARM64E
+        case DYLD_CHAINED_PTR_ARM64E:
+            return "DYLD_CHAINED_PTR_ARM64E";
+#endif
+#ifdef DYLD_CHAINED_PTR_64
+        case DYLD_CHAINED_PTR_64:
+            return "DYLD_CHAINED_PTR_64";
+#endif
+#ifdef DYLD_CHAINED_PTR_64_OFFSET
+        case DYLD_CHAINED_PTR_64_OFFSET:
+            return "DYLD_CHAINED_PTR_64_OFFSET";
+#endif
+#ifdef DYLD_CHAINED_PTR_64_KERNEL_CACHE
+        case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
+            return "DYLD_CHAINED_PTR_64_KERNEL_CACHE";
+#endif
+#ifdef DYLD_CHAINED_PTR_64_FIRMWARE
+        case DYLD_CHAINED_PTR_64_FIRMWARE:
+            return "DYLD_CHAINED_PTR_64_FIRMWARE";
+#endif
+#ifdef DYLD_CHAINED_PTR_32
+        case DYLD_CHAINED_PTR_32:
+            return "DYLD_CHAINED_PTR_32";
+#endif
+#ifdef DYLD_CHAINED_PTR_32_CACHE
+        case DYLD_CHAINED_PTR_32_CACHE:
+            return "DYLD_CHAINED_PTR_32_CACHE";
+#endif
+#ifdef DYLD_CHAINED_PTR_32_FIRMWARE
+        case DYLD_CHAINED_PTR_32_FIRMWARE:
+            return "DYLD_CHAINED_PTR_32_FIRMWARE";
+#endif
+#ifdef DYLD_CHAINED_PTR_ARM64E_USERLAND
+        case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+            return "DYLD_CHAINED_PTR_ARM64E_USERLAND";
+#endif
+#ifdef DYLD_CHAINED_PTR_ARM64E_USERLAND24
+        case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+            return "DYLD_CHAINED_PTR_ARM64E_USERLAND24";
+#endif
+        default:
+            return "unknown";
+    }
+}
+
+static void dump_chained_fixups(mach_context* context,
+                                uint32_t dataoff,
+                                uint32_t datasize)
+{
+    const uint8_t* fixups_base = (const uint8_t*)context->memblock + dataoff;
+    const uint8_t* fixups_end = fixups_base + datasize;
+
+    if (datasize < sizeof(struct dyld_chained_fixups_header)) {
+        printf("chained fixups too small\n");
+        return;
+    }
+
+    const struct dyld_chained_fixups_header* hdr =
+        (const struct dyld_chained_fixups_header*)fixups_base;
+
+    printf("chained fixups header:\n");
+    printf("  fixups_version:  %u\n", hdr->fixups_version);
+    printf("  starts_offset:   0x%x\n", hdr->starts_offset);
+    printf("  imports_offset:  0x%x\n", hdr->imports_offset);
+    printf("  symbols_offset:  0x%x\n", hdr->symbols_offset);
+    printf("  imports_count:   %u\n", hdr->imports_count);
+    printf("  imports_format:  %u (%s)\n",
+           hdr->imports_format,
+           chained_import_format_name(hdr->imports_format));
+    printf("  symbols_format:  %u (%s)\n",
+           hdr->symbols_format,
+           chained_symbol_format_name(hdr->symbols_format));
+
+    if (hdr->starts_offset >= datasize) {
+        printf("bad chained starts_offset\n");
+        return;
+    }
+
+    const struct dyld_chained_starts_in_image* starts =
+        (const struct dyld_chained_starts_in_image*)(fixups_base + hdr->starts_offset);
+
+    if ((const uint8_t*)starts + sizeof(uint32_t) > fixups_end) {
+        printf("bad chained starts table\n");
+        return;
+    }
+
+    printf("chained starts in image:\n");
+    printf("  seg_count: %u\n", starts->seg_count);
+
+    for (uint32_t i = 0; i < starts->seg_count; i++) {
+        uint32_t seg_info_off = starts->seg_info_offset[i];
+
+        if (seg_info_off == 0) {
+            printf("  segment[%u]: no chains\n", i);
+            continue;
+        }
+
+        const struct dyld_chained_starts_in_segment* seg =
+            (const struct dyld_chained_starts_in_segment*)
+            ((const uint8_t*)starts + seg_info_off);
+
+        if ((const uint8_t*)seg + sizeof(*seg) > fixups_end) {
+            printf("  segment[%u]: bad seg_info_off=0x%x\n", i, seg_info_off);
+            continue;
+        }
+
+        printf("  segment[%u]:\n", i);
+        printf("    size:              0x%x\n", seg->size);
+        printf("    page_size:         0x%x\n", seg->page_size);
+        printf("    pointer_format:    %u (%s)\n",
+               seg->pointer_format,
+               chained_pointer_format_name(seg->pointer_format));
+        printf("    segment_offset:    0x%llx\n", seg->segment_offset);
+        printf("    max_valid_pointer: 0x%x\n", seg->max_valid_pointer);
+        printf("    page_count:        %u\n", seg->page_count);
+
+        for (uint16_t page = 0; page < seg->page_count && page < 8; page++) {
+            printf("      page_start[%u]: 0x%x\n",
+                   page,
+                   seg->page_start[page]);
+        }
+
+        if (seg->page_count > 8) {
+            printf("      ...\n");
+        }
+    }
+}
 
 int loader_64(mach_context* context)
 {
@@ -395,8 +552,7 @@ int loader_64(mach_context* context)
             struct dylib_command* lib = (struct dylib_command *)context->ptr;
             printf("%s\n", ((char* )lib + lib->dylib.name.offset));
             dylib_list_retriever(context, ((char* )lib + lib->dylib.name.offset));
-        }else if(command.cmd == LC_DYLD_CHAINED_FIXUPS)
-        {
+        } else if (command.cmd == LC_DYLD_CHAINED_FIXUPS) {
             printf("+++DYLD_CHAINED_FIXUPS+++\n");
 
             struct linkedit_data_command* fixups =
@@ -405,6 +561,8 @@ int loader_64(mach_context* context)
             printf("fixups dataoff=0x%x datasize=0x%x\n",
                    fixups->dataoff,
                    fixups->datasize);
+
+            dump_chained_fixups(context, fixups->dataoff, fixups->datasize);
 
         }else if(command.cmd == LC_DYLD_EXPORTS_TRIE)
         {
