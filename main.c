@@ -16,6 +16,10 @@
 #include "machctrl.h"
 #include "bind.h"
 
+#ifndef MAL_VERBOSE_FIXUPS
+#define MAL_VERBOSE_FIXUPS 0
+#endif
+
 #ifndef MAL_VERBOSE_SYMTAB
 #define MAL_VERBOSE_SYMTAB 0
 #endif
@@ -505,11 +509,13 @@ static void apply_chained_64_offset_rebase(mach_context* context,
 {
     uint64_t target = chained64_rebase_target(raw);
     uint64_t final = (uint64_t)(uintptr_t)context->img_addr + target;
-
+    
+    #if MAL_VERBOSE_FIXUPS
     printf("      APPLY rebase loc=%p target=0x%llx final=0x%llx\n",
            loc,
            target,
            final);
+    #endif
 
     *(uint64_t*)loc = final;
 }
@@ -588,12 +594,16 @@ static void dump_chained_64_offset_entries(mach_context* context,
                 uint64_t target = chained64_rebase_target(raw);
                 void* final = (uint8_t*)context->img_addr + target;
 
+                #if MAL_VERBOSE_FIXUPS
                 printf("      rebase loc=%p raw=0x%016llx target=0x%llx final=%p next=%u\n",
                        loc,
                        raw,
                        target,
                        final,
                        next);
+                }
+                
+                #endif
 
                 apply_chained_64_offset_rebase(context, loc, raw);
                 context->chained_rebase_count++;
