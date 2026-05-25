@@ -92,6 +92,65 @@ uint32_t alignMemory(uint32_t pointer, uint32_t alignment) {
     return (pointer + alignment) & ~alignment;
 }
 
+static int ensure_image_mapping_64(mach_context* context)
+{
+    if (context->img_addr != NULL) {
+        return 0;
+    }
+
+    struct mach_header_64* header = (struct mach_header_64*)context->memblock;
+    uint8_t* p = (uint8_t*)context->memblock + sizeof(struct mach_header_64);
+
+    uint64_t min_vmaddr = UINT64_MAX;
+    uint64_t max_vmaddr = 0;
+
+    for (uint32_t i = 0; i < header->ncmds; i++) {
+        struct segment_command_64* seg = (struct segment_command_64*)p;
+
+        if (seg->cmd == LC_SEGMENT_64 &&
+            strcmp(seg->segname, "__PAGEZERO") &&
+            seg->vmsize != 0) {
+            if (seg->vmaddr < min_vmaddr) {
+                min_vmaddr = seg->vmaddr;
+            }
+
+            if (seg->vmaddr + seg->vmsize > max_vmaddr) {
+                max_vmaddr = seg->vmaddr + seg->vmsize;
+            }
+        }
+
+        p += seg->cmdsize;
+    }
+
+    if (min_vmaddr == UINT64_MAX || max_vmaddr <= min_vmaddr) {
+        printf("no mappable 64-bit segments found\n");
+        return -1;
+    }
+
+    uint64_t map_size = alignMemory(max_vmaddr - min_vmaddr, 0x1000);
+
+    printf("Allocating whole image 0x%llx bytes at 0x%llx\n",
+           map_size,
+           min_vmaddr);
+
+    void* mapped = mmap((void*)min_vmaddr,
+                        map_size,
+                        PROT_READ | PROT_WRITE | PROT_EXEC,
+                        MAP_ANON | MAP_PRIVATE,
+                        -1,
+                        0);
+
+    if (mapped == MAP_FAILED) {
+        printf("Failed mapping whole image: %s\n", strerror(errno));
+        return -1;
+    }
+
+    context->img_addr = mapped;
+    context->v_addr = (void*)min_vmaddr;
+
+    return 0;
+}
+
 int load_segment(mach_context* context)
 {
     struct segment_command lc_segment = *((struct segment_command *)context->ptr);
@@ -146,22 +205,26 @@ int load_segment_64(mach_context* context)
 {
     struct segment_command_64 lc_segment = *((struct segment_command_64 *)context->ptr);
     print_segment_64(lc_segment);
-    //__TEXT
-    if (!strcmp(lc_segment.segname, SEG_TEXT)) {
-        printf("++++++++++++++++++\n");
-        uint64_t filesize = alignMemory(lc_segment.filesize + 0x3000, 0x1000);
-        //uint64_t vmsize = alignMemory(lc_segment.filesize, 0x1000);
-        printf("Allocating 0x%llxbytes at 0x%llx\n",filesize,lc_segment.vmaddr);
-        void* vm_segment = mmap((void*)lc_segment.vmaddr, filesize, PROT_READ | PROT_WRITE | PROT_EXEC , MAP_ANON | MAP_SHARED, -1, 0);
-        if (vm_segment == MAP_FAILED) {
-            printf("Failed mapping %s\n",lc_segment.segname);
-        }
-        memcpy(vm_segment, context->memblock, lc_segment.filesize);
-        
-        //int (*fp)(int argc, char *argv[]) = vm_segment;
-        //(*fp)(0,NULL);
-        context->img_addr = vm_segment;
-        context->v_addr = lc_segment.vmaddr;
+    ensure_image_mapping_64(context);
+    //__TEXT and other areas for modern binary
+    if (strcmp(lc_segment.segname, "__PAGEZERO") &&
+        lc_segment.filesize != 0 &&
+        context->img_addr != NULL &&
+        context->v_addr != NULL) {
+
+        uint64_t base_vmaddr = (uint64_t)(uintptr_t)context->v_addr;
+        uint64_t delta = lc_segment.vmaddr - base_vmaddr;
+
+        void* dest = (uint8_t*)context->img_addr + delta;
+        void* src = (uint8_t*)context->memblock + lc_segment.fileoff;
+
+        memcpy(dest, src, lc_segment.filesize);
+
+        printf("copied segment %s fileoff=0x%llx filesize=0x%llx -> %p\n",
+               lc_segment.segname,
+               lc_segment.fileoff,
+               lc_segment.filesize,
+               dest);
     }
 
     if (context->n_segment_info < MACH_LOADER_MAX_SEGMENTS) {
@@ -332,6 +395,27 @@ int loader_64(mach_context* context)
             struct dylib_command* lib = (struct dylib_command *)context->ptr;
             printf("%s\n", ((char* )lib + lib->dylib.name.offset));
             dylib_list_retriever(context, ((char* )lib + lib->dylib.name.offset));
+        }else if(command.cmd == LC_DYLD_CHAINED_FIXUPS)
+        {
+            printf("+++DYLD_CHAINED_FIXUPS+++\n");
+
+            struct linkedit_data_command* fixups =
+                (struct linkedit_data_command*)context->ptr;
+
+            printf("fixups dataoff=0x%x datasize=0x%x\n",
+                   fixups->dataoff,
+                   fixups->datasize);
+
+        }else if(command.cmd == LC_DYLD_EXPORTS_TRIE)
+        {
+            printf("+++DYLD_EXPORTS_TRIE+++\n");
+
+            struct linkedit_data_command* exports =
+                (struct linkedit_data_command*)context->ptr;
+
+            printf("exports dataoff=0x%x datasize=0x%x\n",
+                   exports->dataoff,
+                   exports->datasize);
         }else{
             printf("0x%lx----------cmd:0x%x--------\n", context->ptr - context->memblock, command.cmd);
         }
