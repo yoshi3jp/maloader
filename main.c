@@ -364,6 +364,9 @@ static void dump_chained_fixups(mach_context* context,
 {
     const uint8_t* fixups_base = (const uint8_t*)context->memblock + dataoff;
     const uint8_t* fixups_end = fixups_base + datasize;
+    
+    context->chained_rebase_count = 0;
+    context->chained_bind_count = 0;
 
     if (datasize < sizeof(struct dyld_chained_fixups_header)) {
         printf("chained fixups too small\n");
@@ -447,6 +450,9 @@ static void dump_chained_fixups(mach_context* context,
             printf("      ...\n");
         }
     }
+        printf("chained fixup summary: rebases=%u binds=%u\n",
+           context->chained_rebase_count,
+           context->chained_bind_count);
 }
 
 static uint32_t chained64_bind_ordinal(uint64_t raw)
@@ -568,6 +574,8 @@ static void dump_chained_64_offset_entries(mach_context* context,
                        addend,
                        name ? name : "(bad ordinal)",
                        next);
+                
+                context->chained_bind_count++;
             } else {
                 uint64_t target = chained64_rebase_target(raw);
                 void* final = (uint8_t*)context->img_addr + target;
@@ -580,6 +588,7 @@ static void dump_chained_64_offset_entries(mach_context* context,
                        next);
 
                 apply_chained_64_offset_rebase(context, loc, raw);
+                context->chained_rebase_count++;
             }
 
             if (next == 0) {
