@@ -40,7 +40,7 @@ int do_bind(mach_context* context)
     libm
 */
     //dylib_list_retriever(context, "/lib/x86_64-linux-gnu/libc-2.15.so");
-dylib_list_retriever(context, "/lib/i386-linux-gnu/libc.so.6");
+dylib_list_retriever(context, "libc.so.6");
     
     printf("loading dylib...\n");
     for (int i = 0; i < context->d_list.n_dylib_info; i++) {
