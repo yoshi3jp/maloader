@@ -203,12 +203,14 @@ int apply_chained_bind(mach_context* context,
 
     uint64_t final = (uint64_t)(uintptr_t)resolved + addend;
 
+#if 0
     printf("      APPLY bind loc=%p symbol=%s resolved=%p addend=%lld final=0x%llx\n",
            loc,
            symbol_name,
            resolved,
            (long long)addend,
            final);
+#endif
 
     *(uint64_t*)loc = final;
     return 0;
@@ -230,6 +232,7 @@ int do_bind(mach_context* context)
 */
     //dylib_list_retriever(context, "/lib/x86_64-linux-gnu/libc-2.15.so");
     dylib_list_retriever(context, "libc.so.6");
+    dylib_list_retriever(context, "libm.so.6");
     
     printf("loading dylib...\n");
     for (int i = 0; i < context->d_list.n_dylib_info; i++) {
