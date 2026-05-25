@@ -490,6 +490,21 @@ static const char* chained_import_name(const uint8_t* fixups_base,
     return symbols + imports[ordinal].name_offset;
 }
 
+static void apply_chained_64_offset_rebase(mach_context* context,
+                                           uint8_t* loc,
+                                           uint64_t raw)
+{
+    uint64_t target = chained64_rebase_target(raw);
+    uint64_t final = (uint64_t)(uintptr_t)context->img_addr + target;
+
+    printf("      APPLY rebase loc=%p target=0x%llx final=0x%llx\n",
+           loc,
+           target,
+           final);
+
+    *(uint64_t*)loc = final;
+}
+
 static void dump_chained_64_offset_entries(mach_context* context,
                                            const uint8_t* fixups_base,
                                            const struct dyld_chained_fixups_header* hdr,
@@ -555,13 +570,16 @@ static void dump_chained_64_offset_entries(mach_context* context,
                        next);
             } else {
                 uint64_t target = chained64_rebase_target(raw);
+                void* final = (uint8_t*)context->img_addr + target;
 
                 printf("      rebase loc=%p raw=0x%016llx target=0x%llx final=%p next=%u\n",
                        loc,
                        raw,
                        target,
-                       (uint8_t*)context->img_addr + target,
+                       final,
                        next);
+
+                apply_chained_64_offset_rebase(context, loc, raw);
             }
 
             if (next == 0) {
