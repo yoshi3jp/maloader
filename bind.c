@@ -91,50 +91,170 @@ continue;
     
 }
 
+static uint64_t read_uleb128(const uint8_t** pp, const uint8_t* end)
+{
+    const uint8_t* p = *pp;
+    uint64_t result = 0;
+    int bit = 0;
+
+    while (p < end) {
+        uint8_t byte = *p++;
+        result |= ((uint64_t)(byte & 0x7f)) << bit;
+
+        if ((byte & 0x80) == 0) {
+            break;
+        }
+
+        bit += 7;
+    }
+
+    *pp = p;
+    return result;
+}
+
+static void append_bind_info(mach_context* context, char* func_name, void* address)
+{
+    if (context->b_list.n_bind_info == 0 && context->b_list.info == NULL) {
+        printf("First pass of BIND\n");
+        context->b_list.info = malloc(sizeof(bind_info));
+    } else {
+        context->b_list.info = realloc(context->b_list.info,
+                                       sizeof(bind_info) *
+                                       (context->b_list.n_bind_info + 1));
+    }
+
+    context->b_list.info[context->b_list.n_bind_info].func_name = func_name;
+    context->b_list.info[context->b_list.n_bind_info].address = address;
+    context->b_list.n_bind_info++;
+}
+
+static void* bind_address_for_segment_offset(mach_context* context,
+                                             int segment_index,
+                                             uint64_t offset)
+{
+    if (segment_index < 0 || segment_index >= context->n_segment_info) {
+        printf("bad bind segment index %d\n", segment_index);
+        return NULL;
+    }
+
+    segment_info* seg = &context->segments[segment_index];
+
+    if (seg->mapped_addr == NULL) {
+        printf("bind target segment %d (%s) is not mapped\n",
+               segment_index,
+               seg->segname);
+        return NULL;
+    }
+
+    return seg->mapped_addr + offset;
+}
+
 int bind_list_retriever(mach_context* context, const uint8_t* const start, const uint8_t* const end)
 {
     printf("bind_list_retriever\n");
-    if(!(context->b_list.n_bind_info != 0))
-    {
-        printf("First pass of BIND\n");
-        context->b_list.info = malloc(sizeof(bind_info));
-    }
-    
+
     const uint8_t* p = start;
-    int done = 0;
-    
-    
-    while ( !done && (p < end) )
-    {
-        uint8_t opcode = *p & BIND_OPCODE_MASK;
-        //printf("opcode = 0x%x\n",opcode);
-        //++p;
+
+    char* symbol_name = NULL;
+    int segment_index = -1;
+    uint64_t segment_offset = 0;
+    const uint64_t pointer_size = sizeof(ptrval);
+
+    while (p < end) {
+        uint8_t byte = *p++;
+        uint8_t opcode = byte & BIND_OPCODE_MASK;
+        uint8_t immediate = byte & BIND_IMMEDIATE_MASK;
+
         switch (opcode) {
+            case BIND_OPCODE_DONE:
+                /*
+                 * In lazy-bind info, DONE terminates one lazy-bind record,
+                 * but more records may follow.  Do not stop the whole parser.
+                 */
+                break;
+
+            case BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
+                break;
+
+            case BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
+                (void)read_uleb128(&p, end);
+                break;
+
+            case BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
+                break;
+
             case BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM:
-                context->b_list.info[context->b_list.n_bind_info].func_name = (char*)p+1;
-                //printf("detected %s\n",context->b_list.info[context->b_list.n_bind_info].func_name);
-                while (*p != '\0')
-                    ++p;
-                ++p;
+                symbol_name = (char*)p;
+                p += strlen(symbol_name) + 1;
                 break;
+
+            case BIND_OPCODE_SET_TYPE_IMM:
+                break;
+
+            case BIND_OPCODE_SET_ADDEND_SLEB:
+                /*
+                 * This loader does not use addends yet.
+                 * For now, consume it like ULEB enough for this old test path.
+                 */
+                (void)read_uleb128(&p, end);
+                break;
+
             case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
-                //printf("ULEB, 0x%x\n",*(p+1));
-                context->b_list.info[context->b_list.n_bind_info].address = *(p+1) + context->img_addr + 0x1000;
-                //printf("addr = 0x%llx\n",context->b_list.info[context->b_list.n_bind_info].address);
-                ++p;
+                segment_index = immediate;
+                segment_offset = read_uleb128(&p, end);
                 break;
-            case BIND_OPCODE_DO_BIND: //end of one bind prepare for next
-                //printf("DO_BIND\n");
-                context->b_list.n_bind_info ++; //increment count of bindings
-                context->b_list.info = realloc(context->b_list.info,sizeof(bind_info) * (context->b_list.n_bind_info + 1));//make more space
-                ++p;
+
+            case BIND_OPCODE_ADD_ADDR_ULEB:
+                segment_offset += read_uleb128(&p, end);
                 break;
+
+            case BIND_OPCODE_DO_BIND: {
+                void* address = bind_address_for_segment_offset(context,
+                                                                segment_index,
+                                                                segment_offset);
+                append_bind_info(context, symbol_name, address);
+                segment_offset += pointer_size;
+                break;
+            }
+
+            case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB: {
+                void* address = bind_address_for_segment_offset(context,
+                                                                segment_index,
+                                                                segment_offset);
+                append_bind_info(context, symbol_name, address);
+                segment_offset += pointer_size;
+                segment_offset += read_uleb128(&p, end);
+                break;
+            }
+
+            case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED: {
+                void* address = bind_address_for_segment_offset(context,
+                                                                segment_index,
+                                                                segment_offset);
+                append_bind_info(context, symbol_name, address);
+                segment_offset += pointer_size + (immediate * pointer_size);
+                break;
+            }
+
+            case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB: {
+                uint64_t count = read_uleb128(&p, end);
+                uint64_t skip = read_uleb128(&p, end);
+
+                for (uint64_t i = 0; i < count; i++) {
+                    void* address = bind_address_for_segment_offset(context,
+                                                                    segment_index,
+                                                                    segment_offset);
+                    append_bind_info(context, symbol_name, address);
+                    segment_offset += pointer_size + skip;
+                }
+                break;
+            }
+
             default:
-                ++p;
+                printf("unknown bind opcode 0x%x\n", opcode);
+                break;
         }
     }
-    
-    //print_bind_list(&(context->b_list));
-    
+
     return 0;
 }

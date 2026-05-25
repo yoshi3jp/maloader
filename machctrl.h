@@ -26,6 +26,15 @@ typedef struct  {
     dylib_info*      info;
 } dylib_list;
 
+#define MACH_LOADER_MAX_SEGMENTS 32
+
+typedef struct {
+    char     segname[16];
+    void*    vmaddr;
+    uint64_t vmsize;
+    void*    mapped_addr;
+} segment_info;
+
 typedef struct  {
     void*   memblock;//where the mapped objectfile is.
     void*   ptr;    //current read out;
@@ -34,6 +43,8 @@ typedef struct  {
     void*   entry_point;
     bind_list b_list;
     dylib_list d_list;
+    int             n_segment_info;
+    segment_info    segments[MACH_LOADER_MAX_SEGMENTS];
     int argc;
     char **argv;
     int bit;

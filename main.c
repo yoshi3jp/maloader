@@ -113,6 +113,32 @@ int load_segment(mach_context* context)
         context->img_addr = vm_segment;
         context->v_addr = lc_segment.vmaddr;
     }
+
+    if (context->n_segment_info < MACH_LOADER_MAX_SEGMENTS) {
+        segment_info* seg = &context->segments[context->n_segment_info++];
+
+        memcpy(seg->segname, lc_segment.segname, sizeof(seg->segname));
+        seg->vmaddr = (void*)lc_segment.vmaddr;
+        seg->vmsize = lc_segment.vmsize;
+
+        if (!strcmp(lc_segment.segname, "__PAGEZERO")) {
+            seg->mapped_addr = NULL;
+        } else if (!strcmp(lc_segment.segname, SEG_TEXT)) {
+            seg->mapped_addr = context->img_addr;
+        } else if (context->img_addr && context->v_addr) {
+            seg->mapped_addr =
+                (void*)((uintptr_t)context->img_addr +
+                        (lc_segment.vmaddr - (uintptr_t)context->v_addr));
+        } else {
+            seg->mapped_addr = NULL;
+        }
+
+        printf("recorded segment[%d] %s vmaddr=0x%llx mapped=%p\n",
+               context->n_segment_info - 1,
+               seg->segname,
+               lc_segment.vmaddr,
+               seg->mapped_addr);
+    }
     return lc_segment.nsects;
 }
 
@@ -137,6 +163,33 @@ int load_segment_64(mach_context* context)
         context->img_addr = vm_segment;
         context->v_addr = lc_segment.vmaddr;
     }
+
+    if (context->n_segment_info < MACH_LOADER_MAX_SEGMENTS) {
+        segment_info* seg = &context->segments[context->n_segment_info++];
+
+        memcpy(seg->segname, lc_segment.segname, sizeof(seg->segname));
+        seg->vmaddr = (void*)lc_segment.vmaddr;
+        seg->vmsize = lc_segment.vmsize;
+
+        if (!strcmp(lc_segment.segname, "__PAGEZERO")) {
+            seg->mapped_addr = NULL;
+        } else if (!strcmp(lc_segment.segname, SEG_TEXT)) {
+            seg->mapped_addr = context->img_addr;
+        } else if (context->img_addr && context->v_addr) {
+            seg->mapped_addr =
+                (void*)((uintptr_t)context->img_addr +
+                        (lc_segment.vmaddr - (uintptr_t)context->v_addr));
+        } else {
+            seg->mapped_addr = NULL;
+        }
+
+        printf("recorded segment[%d] %s vmaddr=0x%llx mapped=%p\n",
+               context->n_segment_info - 1,
+               seg->segname,
+               lc_segment.vmaddr,
+               seg->mapped_addr);
+    }
+
     return lc_segment.nsects;
 }
 
@@ -415,7 +468,7 @@ int main(int argc, char *argv[])
     char* filename = argv[1];
     printf("%s\n",filename);
     
-    mach_context c;
+    mach_context c = {0};
     mach_context* context = &c;
     context->argc = argc - 1;
     context->argv = &argv[1];
@@ -423,7 +476,7 @@ int main(int argc, char *argv[])
     context->bit = determineBit(context->memblock);
     context->b_list.n_bind_info = 0;
     context->d_list.n_dylib_info = 0;
-    
+    context->n_segment_info = 0;
     
     
     typedef int (*mach_loader)(mach_context*);
