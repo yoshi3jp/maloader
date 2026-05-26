@@ -600,9 +600,7 @@ static void dump_chained_64_offset_entries(mach_context* context,
                        raw,
                        target,
                        final,
-                       next);
-                }
-                
+                       next);         
                 #endif
 
                 apply_chained_64_offset_rebase(context, loc, raw);
@@ -836,7 +834,10 @@ int loader(mach_context* context)
                 printf("0x%lx -> %s %d\n", (void *)nlist.n_value - context->v_addr, symbol, nlist.n_type);
                 if (!strcmp(symbol, "_main"))
                 {
-                    context->entry_point = (void *)nlist.n_value - context->v_addr + context->img_addr;
+                    context->entry_point =
+                         (mach_main_entry_t)((uint8_t *)context->img_addr +
+                                            ((uintptr_t)nlist.n_value -
+                                             (uintptr_t)context->v_addr));
                 }
                 c_str += 1;
             }
@@ -892,13 +893,48 @@ int main(int argc, char *argv[])
     typedef int (*mach_loader)(mach_context*);
     mach_loader l[2]={loader,loader_64};
     
-    l[(context->bit) >> 6](context);
+    int loader_result = l[(context->bit) >> 6](context);
+    if (loader_result != 0) {
+        fprintf(stderr,
+                "maloader: loader failed for %s (%d-bit), result=%d\n",
+                filename,
+                context->bit,
+                loader_result);
+        //return 1;
+    }
+
+    if (context->img_addr == NULL || context->v_addr == NULL) {
+        fprintf(stderr,
+                "maloader: image mapping was not established "
+                "(img_addr=%p, v_addr=%p)\n",
+                context->img_addr,
+                context->v_addr);
+        //return 1;
+    }
+
+    if (context->entry_point == NULL) {
+        fprintf(stderr, "maloader: no entry point found\n");
+        //return 1;
+    }
+
+    if (context->chained_unresolved_bind_count != 0) {
+        fprintf(stderr,
+                "maloader: unresolved chained binds: %u\n",
+                context->chained_unresolved_bind_count);
+        //return 1;
+    }
     
-    do_bind(context);
     
-    int (*fp)(int, char **) = (void *)context->entry_point;
-    printf("now to exec from 0x%lx\n", fp);
-    int result = fp(context->argc,context->argv);
+    int bind_result = do_bind(context);
+    if (bind_result != 0) {
+        fprintf(stderr,
+                "maloader: bind failed, result=%d\n",
+                bind_result);
+        //return 1;
+    }
+    
+    printf("now to exec from %p\n", (void *)context->entry_point);
+    int result = context->entry_point(context->argc, context->argv);
     printf("result=%d\n",result);
     return 0;
 }

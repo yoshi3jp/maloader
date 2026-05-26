@@ -35,12 +35,14 @@ typedef struct {
     void*    mapped_addr;
 } segment_info;
 
+typedef int (*mach_main_entry_t)(int argc, char **argv);
+
 typedef struct  {
     void*   memblock;//where the mapped objectfile is.
     void*   ptr;    //current read out;
     void*   img_addr;//executable on memory
     void*    v_addr;//virtual address that was found in the binary
-    void*   entry_point;
+    mach_main_entry_t   entry_point;
     bind_list b_list;
     dylib_list d_list;
     int             n_segment_info;
