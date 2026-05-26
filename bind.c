@@ -105,6 +105,20 @@ static void* open_host_libc(void)
     return libc_handle;
 }
 
+static void* open_host_libm(void)
+{
+    static void* libm_handle;
+
+    if (!libm_handle) {
+        libm_handle = dlopen("libm.so.6", RTLD_LAZY | RTLD_GLOBAL);
+        if (!libm_handle) {
+            printf("dlopen(libm.so.6) failed: %s\n", dlerror());
+        }
+    }
+
+    return libm_handle;
+}
+
 static void normalize_macho_symbol_name(const char* macho_name,
                                         char* out,
                                         size_t out_size)
@@ -138,7 +152,8 @@ static void* resolve_macho_import_symbol(const char* macho_name)
 
     normalize_macho_symbol_name(macho_name, namebuf, sizeof(namebuf));
 
-    if (!strcmp(namebuf, "__NSGetEnviron")) {
+    if (!strcmp(namebuf, "_NSGetEnviron") ||
+    !strcmp(namebuf, "__NSGetEnviron")) {
         return mal_NSGetEnviron;
     }
 
@@ -177,12 +192,37 @@ static void* resolve_macho_import_symbol(const char* macho_name)
         return mal_memset_pattern16;
     }
 
+    void* sym;
+
     void* libc = open_host_libc();
-    if (!libc) {
-        return NULL;
+    if (libc) {
+        sym = dlsym(libc, namebuf);
+        if (sym) {
+            return sym;
+        }
     }
 
-    return dlsym(libc, namebuf);
+    void* libm = open_host_libm();
+    if (libm) {
+        sym = dlsym(libm, namebuf);
+        if (sym) {
+            return sym;
+    }
+    
+    sym = dlsym(RTLD_DEFAULT, namebuf);
+    if (sym) {
+        return sym;
+    }
+printf("unresolved import after libc/libm/default lookup: %s\n", namebuf); //DEBUG
+    return NULL;
+}
+
+sym = dlsym(RTLD_DEFAULT, namebuf);
+if (sym) {
+    return sym;
+}
+
+return NULL;
 }
 
 int apply_chained_bind(mach_context* context,
