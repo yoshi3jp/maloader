@@ -58,6 +58,13 @@ void print_bind_list(bind_list* list)
     printf("---           ---\n");
 }
 
+static int mal_h_errno; //ToDo: replace to __h_errno_location()
+
+static int mal_atexit(void (*func)(void))
+{
+    return atexit(func);
+}
+
 static int* mal_darwin_error(void)
 {
     return &errno;
@@ -190,6 +197,14 @@ static void* resolve_macho_import_symbol(const char* macho_name)
 
     if (!strcmp(namebuf, "memset_pattern16")) {
         return mal_memset_pattern16;
+    }
+    
+    if (!strcmp(namebuf, "h_errno")) {
+        return &mal_h_errno;
+    }
+    
+    if (!strcmp(namebuf, "atexit")) {
+        return mal_atexit;
     }
 
     void* sym;
